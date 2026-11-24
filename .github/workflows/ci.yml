@@ -1,0 +1,52 @@
+name: Check WinRep
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Windows PowerShell 5.1 checks (no repairs)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1' }
+          & .\tests\Test-WinRep.ps1
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Package the double-click edition
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF_NAME -ne 'v1.3.0') { throw 'Update the release version in the workflow and scripts together.' }
+          $stage = Join-Path $env:RUNNER_TEMP 'winrep'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item winrep.cmd,winrep.ps1,README.md,LICENSE,CHANGELOG.md -Destination $stage
+          Copy-Item lib,docs -Destination $stage -Recurse
+          $zip = "winrep-$env:GITHUB_REF_NAME.zip"
+          Compress-Archive -Path $stage -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path SHA256SUMS.txt -Value "$hash  $zip" -Encoding ASCII
+      - name: Publish release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME "winrep-$env:GITHUB_REF_NAME.zip" SHA256SUMS.txt --verify-tag --title "WinRep $env:GITHUB_REF_NAME - Windows needs a little help" --notes "English interface, safer elevation, isolated logs, improved SFC detection and Windows PowerShell 5.1 checks. Extract the entire ZIP and double-click winrep.cmd. No installer required."
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }

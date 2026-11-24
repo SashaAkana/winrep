@@ -1,0 +1,4 @@
+*.log
+*.bin
+WinRep-20*/
+/dist/
